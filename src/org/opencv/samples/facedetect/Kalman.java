@@ -21,7 +21,7 @@ public class Kalman {
 	private boolean   configured = false;
 	private boolean   firstValue = false;
 	private double    pulse      = 0;
-	private double    f          = 1.8; // frequency
+	private double    f          = 0; // frequency
 	private double    omega;
 	private double    x,x_dt,z;
 	private double    pi         = (double) 3.141592654;
