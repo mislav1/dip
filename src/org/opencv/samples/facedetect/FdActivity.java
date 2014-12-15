@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
@@ -31,6 +32,8 @@ import android.os.Bundle;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.MotionEvent;
+import android.view.View;
 import android.view.WindowManager;
 
 public class FdActivity extends Activity implements CvCameraViewListener2 {
@@ -39,8 +42,8 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
     private static final Scalar    FACE_RECT_COLOR     = new Scalar(0, 255, 0, 255);
     public static final int        JAVA_DETECTOR       = 0;
     public static final int        NATIVE_DETECTOR     = 1;
-    public static final int        FIRST       = 0;
-    public static final int        SECOND     = 1;
+    public static final int        FIRST               = 0;
+    public static final int        SECOND              = 1;
 
     private MenuItem               mItemFace50;
     private MenuItem               mItemFace40;
@@ -55,10 +58,6 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
     private Mat                    mSpectrum;
     private Scalar                 CONTOUR_COLOR;
     private Size                   SPECTRUM_SIZE;
-    private double                 sum;
-    private double                 itensity = 0;
-    private int                    faceX = 0;
-    private int                    faceY = 0;
     
     private Mat                    mRgba;
     private Mat                    mGray;
@@ -69,14 +68,29 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
     private int                    mDetectorType       = JAVA_DETECTOR;
     private String[]               mDetectorName;
     private String[]               mCameraName;
-    private int                    mCamera         =FIRST;
+    private int                    mCamera             =FIRST;
+    private int                    skinColorDelay      = 50;
+    private int                    skinColorCounter    =0;
+    private int                    faceDetectionDelay  =80;
+    private int                    faceDetectionCounter=0;
+    
+    private MatOfRect              oldFaces;
+    private MatOfRect              faces; 
 
+    private double                 oldRgbValue         =0;
+    private double                 red                 =0;
+    private double                 pulse               =0;
     private float                  mRelativeFaceSize   = 0.2f;
     private int                    mAbsoluteFaceSize   = 0;
     
-    //private int                    mCameraIndex=-1;
+    private boolean                skipFirstPixel      =true;
+    
+    List                           pulseList           = new ArrayList();
+    List                           pulseListMinus      = new ArrayList();
 
     private CameraBridgeViewBase   mOpenCvCameraView;
+    
+    private Kalman                 kalman              = new Kalman();
 
     private BaseLoaderCallback  mLoaderCallback = new BaseLoaderCallback(this) {
         @Override
@@ -179,15 +193,13 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
 
     public void onCameraViewStarted(int width, int height) {
         mGray = new Mat();
-        //mRgba = new Mat();
         mDetector = new ColorBlobDetector();
-        // my skin 243.609375 34.953125 238.53125 0.0
         mRgba = new Mat(height, width, CvType.CV_8UC4);
         mDetector = new ColorBlobDetector();
         mSpectrum = new Mat();
+        SPECTRUM_SIZE = new Size(200, 64);
         mBlobColorRgba = new Scalar(255);
         mBlobColorHsv = new Scalar(255);
-        SPECTRUM_SIZE = new Size(200, 64);
         CONTOUR_COLOR = new Scalar(255,0,0,255);
         //mBlobColorHsv.val[0]=243.609375;
         //mBlobColorHsv.val[1]=34.953125;
@@ -195,7 +207,6 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
         //mBlobColorHsv.val[3]=0.0;
         //mDetector.setHsvColor(mBlobColorHsv);
         //mBlobColorRgba = converScalarHsv2Rgba(mBlobColorHsv);
-        //mSpectrum = new Mat();
         //Imgproc.resize(mDetector.getSpectrum(), mSpectrum, SPECTRUM_SIZE);
     }
 
@@ -211,93 +222,183 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
 
         return new Scalar(pointMatRgba.get(0, 0));
     }
+    
+    public void PixelItensity (List<MatOfPoint> skinPixelOnFace, Mat face){
 
+    	double itensity=0;
+       	double sum=0;
+    	Iterator<MatOfPoint> itr = skinPixelOnFace.iterator(); 
+        while(itr.hasNext()){
+            MatOfPoint tmp = itr.next();
+            List<Point> listOfPoints = tmp.toList();            
+            Iterator<Point> iterator = listOfPoints.iterator();
+            
+            while(iterator.hasNext()){
+                Point p = iterator.next();
+                
+                int x = (int) p.x;
+                int y = (int) p.y;
+                
+                byte[] px = new byte[4];
+                face.get(y, x, px);
+                //Log.i(TAG,"rgb ->"+px[0]);
+                
+                byte r = (byte) px[0];
+                int pixel_r = r & 0xFF;
+                
+                byte g = (byte) px[1];
+                int pixel_g = g & 0xFF;
+                
+                byte b = (byte) px[2];
+                int pixel_b = b & 0xFF;
+                
+                int pixel=(pixel_r + pixel_g + pixel_b)/3;
+                itensity = pixel + itensity;
+                ++sum;
+
+             }
+        }
+       	double average = itensity / sum;
+       	
+       	if(!skipFirstPixel){
+       	//Log.i(TAG,"average rgb value->"+average);
+       	//Log.i(TAG,"itensity value->"+itensity);
+       	//Log.i(TAG,"sum value->"+sum);
+       	
+       	//Log.i(TAG, "Touched rgba color: "+String.valueOf(average)+" .");
+       	Core.putText(mRgba, String.valueOf(average), new Point(10, 130), 3/* CV_FONT_HERSHEY_COMPLEX */, 2, new Scalar(255, 0, 0, 0), 3);   	
+        
+       	//Log.i(TAG,"average rgb value->"+average);       	
+       	pulseList.add(average);      	
+       	Log.i(TAG,"pulse list->"+pulseList);   	
+        red = average - oldRgbValue;     
+        pulseListMinus.add(red);
+        Log.i(TAG,"pulse list minus ->"+pulseListMinus);    
+        //Log.i(TAG,"red = average - oldRgbValue ->"+red);      
+        pulse = kalman.getEstimation(red);       
+        Core.putText(mRgba, String.valueOf((int)(pulse)), new Point(10, 300), 20/* CV_FONT_HERSHEY_COMPLEX */, 2, new Scalar(255, 255, 255, 0), 6);
+       	
+        oldRgbValue = average;
+       	}
+       	else{
+       		oldRgbValue = average;
+            skipFirstPixel=false;
+       	}
+       	
+    }
+    
+    public void CalculateSkinColorRange_2 ( Rect face) {
+
+        int cols = face.height;
+        int rows = face.width;
+
+        Point top = face.tl();
+        Point bottom = face.br();
+        
+        int x = (int) (top.x + (int) cols/2);
+        int y = (int) (top.y + (int) rows/2);
+
+        if ((x < 0) || (y < 0) || (x > cols) || (y > rows)) return;
+        
+        Rect touchedRect = new Rect();
+
+        //touchedRect.x = (x>20) ? x-20 : 0;
+        //touchedRect.y = (y>20) ? y-20 : 0;
+
+        //touchedRect.width = (x+40 < cols) ? x + 40 - touchedRect.x : cols - touchedRect.x;
+        //touchedRect.height = (y+40 < rows) ? y + 40 - touchedRect.y : rows - touchedRect.y;
+        
+        touchedRect.x = (int) (top.x + (int) (cols*0.2));
+        touchedRect.y = (int) (top.y + (int) (rows*0.45));
+
+        touchedRect.width = (int) ((int) (cols*0.6 ));
+        touchedRect.height = (int) ((int) (rows*0.2));
+        
+        Mat touchedRegionRgba = mRgba.submat(touchedRect);
+        Core.rectangle(mRgba,touchedRect.tl(), touchedRect.br(),FACE_RECT_COLOR,5);
+
+        Mat touchedRegionHsv = new Mat();
+        Imgproc.cvtColor(touchedRegionRgba, touchedRegionHsv, Imgproc.COLOR_RGB2HSV_FULL);
+
+        // Calculate average color of touched region
+        mBlobColorHsv = Core.sumElems(touchedRegionHsv);
+        int pointCount = touchedRegionHsv.width()*touchedRegionHsv.height();
+        for (int i = 0; i < mBlobColorHsv.val.length; i++)
+            mBlobColorHsv.val[i] /= pointCount;
+
+        mBlobColorRgba = converScalarHsv2Rgba(mBlobColorHsv);
+
+        Log.i(TAG, "Touched rgba color: (" + mBlobColorHsv.val[0] + ", " + mBlobColorHsv.val[1] +
+                ", " + mBlobColorHsv.val[2] + ", " + mBlobColorHsv.val[3] + ")");
+
+        mDetector.setHsvColor(mBlobColorHsv);
+
+        Imgproc.resize(mDetector.getSpectrum(), mSpectrum, SPECTRUM_SIZE);
+        return;
+
+    }
+    
     public Mat onCameraFrame(CvCameraViewFrame inputFrame) {
 
         mRgba = inputFrame.rgba();
         mGray = inputFrame.gray();
 
-        if (mAbsoluteFaceSize == 0) {
-            int height = mGray.rows();
-            if (Math.round(height * mRelativeFaceSize) > 0) {
-                mAbsoluteFaceSize = Math.round(height * mRelativeFaceSize);
-            }
-            mNativeDetector.setMinFaceSize(mAbsoluteFaceSize);
-        }
-
-        MatOfRect faces = new MatOfRect();
-
-        if (mDetectorType == JAVA_DETECTOR) {
-            if (mJavaDetector != null)
-                mJavaDetector.detectMultiScale(mGray, faces, 1.1, 2, 2, // TODO: objdetect.CV_HAAR_SCALE_IMAGE
-                        new Size(mAbsoluteFaceSize, mAbsoluteFaceSize), new Size());
-        }
-        else if (mDetectorType == NATIVE_DETECTOR) {
-            if (mNativeDetector != null)
-                mNativeDetector.detect(mGray, faces);
-        }
-        else {
-            Log.e(TAG, "Detection method is not selected!");
-        }
-
+    	if ( faceDetectionCounter % faceDetectionDelay == 0){	        
+	        if (mAbsoluteFaceSize == 0) {
+	            int height = mGray.rows();
+	            if (Math.round(height * mRelativeFaceSize) > 0) {
+	                mAbsoluteFaceSize = Math.round(height * mRelativeFaceSize);
+	            }
+	            mNativeDetector.setMinFaceSize(mAbsoluteFaceSize);
+	        }
+	
+	        faces = new MatOfRect();
+	
+	        if (mDetectorType == JAVA_DETECTOR) {
+	            if (mJavaDetector != null)
+	                mJavaDetector.detectMultiScale(mGray, faces, 1.1, 2, 2, // TODO: objdetect.CV_HAAR_SCALE_IMAGE
+	                        new Size(mAbsoluteFaceSize, mAbsoluteFaceSize), new Size());
+	        }
+	        else if (mDetectorType == NATIVE_DETECTOR) {
+	            if (mNativeDetector != null)
+	                mNativeDetector.detect(mGray, faces);
+	        }
+	        else {
+	            Log.e(TAG, "Detection method is not selected!");
+	        }
+	        oldFaces=faces;
+    	}
+	    ++faceDetectionCounter;
+	    faces=oldFaces;
         Rect[] facesArray = faces.toArray();
         for (int i = 0; i < facesArray.length; i++){
 
 //----------------------------------------------------------------------------------------------
-
+        	
             Mat onlyFace = mRgba.submat(facesArray[i]);
             Core.rectangle(mRgba, facesArray[i].tl(), facesArray[i].br(), FACE_RECT_COLOR, 3);
         
-            /////////////////////////////////////////////////////////////////////////////////
-    	    if (onlyFace.height() > 0 && onlyFace.width() > 0 && onlyFace.height() >17 && onlyFace.width() > 17){
-                faceY = (int) (onlyFace.height()/2);
-                faceX =(int) (onlyFace.width()/2);
-                Log.i(TAG,faceY+"  "+faceX);
-                //Rect roi = new Rect( (int) faceX*20, (int) faceY*50, (int) faceX*80, (int) faceY*65);
-                Rect roi = new Rect(faceX, faceY, faceX+8,faceY+8);
-                Mat subFaceRect = new Mat (onlyFace, roi);
-                Mat colorLabel1 = onlyFace.submat(roi);
-                colorLabel1.setTo(mBlobColorRgba);
-    	
-    	
-                // Calculate average color of touched region
-                mBlobColorHsv = Core.sumElems(subFaceRect);
-                int pointCount = subFaceRect.width()*subFaceRect.height();
-                for (int x = 0; x < mBlobColorHsv.val.length; x++)
-                    mBlobColorHsv.val[x] /= pointCount;
+            //skinColorCounter % skinColorDelay == 0
+            //CalculateSkinColorRange_2(facesArray[i]);
+            if (skinColorCounter % skinColorDelay == 0){
+                CalculateSkinColorRange_2(facesArray[i]);
+            }
+            
+            mDetector.process(onlyFace);
+            List<MatOfPoint> contours = mDetector.getContours();
+            Log.e(TAG, "Contours count: " + contours.size());
+            if (contours.size()>=1){
+            PixelItensity(contours,onlyFace);
+            }
+            Imgproc.drawContours(onlyFace, contours, -1, CONTOUR_COLOR);
+            //skin collor in upper right corner
+            Mat colorLabel = mRgba.submat(4, 68, 4, 68);
+            colorLabel.setTo(mBlobColorRgba);
 
-        
-                Core.putText(mRgba,"  "+pointCount+"  "+subFaceRect.width()+"  "+subFaceRect.height(), new Point(10, 200), 2/* CV_FONT_HERSHEY_COMPLEX */, 2, new Scalar(255, 0, 0, 255), 3);
-                mBlobColorRgba = converScalarHsv2Rgba(mBlobColorHsv);
-
-                Log.i(TAG, "Touched rgba color: (" + mBlobColorHsv.val[0] + ", " + mBlobColorHsv.val[1] + ", " + mBlobColorHsv.val[2] + ", " + mBlobColorHsv.val[3] + ")");
-                mDetector.setHsvColor(mBlobColorHsv);
-                Imgproc.resize(mDetector.getSpectrum(), mSpectrum, SPECTRUM_SIZE);
-                ///////////////////////////////////////////////////////////////////////
-        
-                mDetector.process(onlyFace);
-                List<MatOfPoint> contours = mDetector.getContours();
-                Log.e(TAG, "Contours count: " + contours.size());
-                Imgproc.drawContours(onlyFace, contours, -1, CONTOUR_COLOR);
-               	//skin collor in upper right corner
-               	Mat colorLabel = mRgba.submat(4, 68, 4, 68);
-               	colorLabel.setTo(mBlobColorRgba);
-
-               	//Mat spectrumLabel = mRgba.submat(4, 4 + mSpectrum.rows(), 70, 70 + mSpectrum.cols());
-               	//mSpectrum.copyTo(spectrumLabel);
-               	Iterator<MatOfPoint> each = contours.iterator();
-               	itensity=0;
-               	sum=0;
-               	while (each.hasNext()){
-               		MatOfPoint wrapper = each.next();
-               		double area = Imgproc.contourArea(wrapper);
-               		itensity = area + itensity;
-               		sum=sum+1;
-               	}
-               	double average = itensity / sum;
-               	Log.i(TAG, "Touched rgba color: "+String.valueOf(average)+" .");
-               	Core.putText(mRgba, String.valueOf(average), new Point(10, 100), 3/* CV_FONT_HERSHEY_COMPLEX */, 2, new Scalar(255, 0, 0, 255), 3);
-    	    	}
+            Mat spectrumLabel = mRgba.submat(4, 4 + mSpectrum.rows(), 70, 70 + mSpectrum.cols());
+            mSpectrum.copyTo(spectrumLabel);
+            
+    	    ++skinColorCounter;
         }
 //----------------------------------------------------------------------------------------------        
         
@@ -368,19 +469,39 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
                 Log.i(TAG, "Main camera");
                 //mOpenCvCameraView.setCameraIndex(1);
                 mOpenCvCameraView.disableView();
+                mGray.release();
+                mRgba.release();
+                mDetector = new ColorBlobDetector();
+                mSpectrum = new Mat();
+                SPECTRUM_SIZE = new Size(200, 64);
+                mBlobColorRgba = new Scalar(255);
+                mBlobColorHsv = new Scalar(255);
+                CONTOUR_COLOR = new Scalar(255,0,0,255);
                 mOpenCvCameraView = (CameraBridgeViewBase) findViewById(R.id.fd_activity_surface_view);
                 mOpenCvCameraView.setCameraIndex(1);
                 //1 -> main camera
                 mOpenCvCameraView.setCvCameraViewListener(this);
+                skipFirstPixel=true;
+                kalman = new Kalman();
                 OpenCVLoader.initAsync(OpenCVLoader.OPENCV_VERSION_2_4_3, this, mLoaderCallback);
             } else {
                 Log.i(TAG, "Front camera");
                 //mOpenCvCameraView.setCameraIndex(-1);
                 mOpenCvCameraView.disableView();
+                mGray.release();
+                mRgba.release();
+                mDetector = new ColorBlobDetector();
+                mSpectrum = new Mat();
+                SPECTRUM_SIZE = new Size(200, 64);
+                mBlobColorRgba = new Scalar(255);
+                mBlobColorHsv = new Scalar(255);
+                CONTOUR_COLOR = new Scalar(255,0,0,255);
                 mOpenCvCameraView = (CameraBridgeViewBase) findViewById(R.id.fd_activity_surface_view);
                 mOpenCvCameraView.setCameraIndex(-1);
                 //-1 -> front camera
                 mOpenCvCameraView.setCvCameraViewListener(this);
+                skipFirstPixel=true;
+                kalman = new Kalman();
                 OpenCVLoader.initAsync(OpenCVLoader.OPENCV_VERSION_2_4_3, this, mLoaderCallback);
             }
         }
