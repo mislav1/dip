@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -32,8 +33,6 @@ import android.os.Bundle;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
-import android.view.MotionEvent;
-import android.view.View;
 import android.view.WindowManager;
 
 public class FdActivity extends Activity implements CvCameraViewListener2 {
@@ -51,6 +50,7 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
     private MenuItem               mItemFace20;
     private MenuItem               mItemType;
     private MenuItem               mCameraType;
+    private MenuItem               mItemExit;
 
     private ColorBlobDetector      mDetector;
     private Scalar                 mBlobColorRgba;
@@ -87,8 +87,18 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
     
     List                           pulseList           = new ArrayList();
     List                           pulseListMinus      = new ArrayList();
+    
+    private String                 stringListPulse     = "";
+    private String                 stringListRgb       = "";
+    private String                 stringListMinus     = "";
+    private String                 stringListKalman     = "";
 
     private CameraBridgeViewBase   mOpenCvCameraView;
+    
+    private CustomLog PulseLogPulse = new  CustomLog("pulse.txt");
+    private CustomLog PulseLogRgb = new  CustomLog("rgb.txt");
+    private CustomLog PulseLogMinus = new  CustomLog("minus.txt");
+    private CustomLog PulseLogKalman = new  CustomLog("kalman.txt");
     
     private Kalman                 kalman              = new Kalman();
 
@@ -187,8 +197,13 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
     }
 
     public void onDestroy() {
+    	PulseLogPulse.appendLog("[ "+stringListPulse+" ];");
+    	PulseLogMinus.appendLog("[ "+stringListMinus+" ];");
+    	PulseLogRgb.appendLog("[ "+stringListRgb+" ];");
+    	PulseLogKalman.appendLog("[ "+stringListKalman+" ];");
         super.onDestroy();
         mOpenCvCameraView.disableView();
+        System.exit(0);
     }
 
     public void onCameraViewStarted(int width, int height) {
@@ -253,7 +268,7 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
                 int pixel_b = b & 0xFF;
                 
                 int pixel=(pixel_r + pixel_g + pixel_b)/3;
-                itensity = pixel + itensity;
+                itensity = pixel_r + itensity;
                 ++sum;
 
              }
@@ -266,17 +281,31 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
        	//Log.i(TAG,"sum value->"+sum);
        	
        	//Log.i(TAG, "Touched rgba color: "+String.valueOf(average)+" .");
-       	Core.putText(mRgba, String.valueOf(average), new Point(10, 130), 3/* CV_FONT_HERSHEY_COMPLEX */, 2, new Scalar(255, 0, 0, 0), 3);   	
+       	//Core.putText(mRgba, String.valueOf(average), new Point(10, 130), 3/* CV_FONT_HERSHEY_COMPLEX */, 2, new Scalar(255, 0, 0, 0), 3);   	
         
        	//Log.i(TAG,"average rgb value->"+average);       	
-       	pulseList.add(average);      	
-       	Log.i(TAG,"pulse list->"+pulseList);   	
+       	//pulseList.add(average);      	
+       	//Log.i(TAG,"pulse list->"+pulseList);   	
         red = average - oldRgbValue;     
-        pulseListMinus.add(red);
-        Log.i(TAG,"pulse list minus ->"+pulseListMinus);    
-        //Log.i(TAG,"red = average - oldRgbValue ->"+red);      
-        pulse = kalman.getEstimation(red);       
-        Core.putText(mRgba, String.valueOf((int)(pulse)), new Point(10, 300), 20/* CV_FONT_HERSHEY_COMPLEX */, 2, new Scalar(255, 255, 255, 0), 6);
+        //pulseListMinus.add(red);
+        //Log.i(TAG,"pulse list minus ->"+pulseListMinus);    
+        //Log.i(TAG,"red = average - oldRgbValue ->"+red);  
+        
+        String strRgb = new DecimalFormat("###.#####").format(average);
+        stringListRgb +=" "+strRgb+",";
+        
+        String strMinus = new DecimalFormat("###.#####").format(red);
+        stringListMinus +=" "+strMinus+",";   
+        
+        double[] pulse = kalman.getEstimation(red);  
+        
+        String strPulse = new DecimalFormat("###.#####").format(pulse[0]);
+        stringListPulse +=" "+strPulse+",";
+        
+        String strKalman = new DecimalFormat("###.#####").format(pulse[1]);
+        stringListKalman +=" "+strKalman+",";
+        
+        Core.putText(mRgba, String.valueOf((int)(pulse[0])), new Point(10, 300), 20/* CV_FONT_HERSHEY_COMPLEX */, 2, new Scalar(255, 255, 255, 0), 6);
        	
         oldRgbValue = average;
        	}
@@ -293,7 +322,6 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
         int rows = face.width;
 
         Point top = face.tl();
-        Point bottom = face.br();
         
         int x = (int) (top.x + (int) cols/2);
         int y = (int) (top.y + (int) rows/2);
@@ -409,19 +437,23 @@ public class FdActivity extends Activity implements CvCameraViewListener2 {
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         Log.i(TAG, "called onCreateOptionsMenu");
-        mItemFace50 = menu.add("Face size 50%");
-        mItemFace40 = menu.add("Face size 40%");
-        mItemFace30 = menu.add("Face size 30%");
-        mItemFace20 = menu.add("Face size 20%");
+        mItemExit   = menu.add("Exit");
+        mItemFace50 = menu.add("Size 50%");
+        mItemFace40 = menu.add("Size 40%");
+        mItemFace30 = menu.add("Size 30%");
+        mItemFace20 = menu.add("Size 20%");
         mCameraType = menu.add(mCameraName[mCamera]);
         mItemType   = menu.add(mDetectorName[mDetectorType]);
+        
         return true;
     }
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         Log.i(TAG, "called onOptionsItemSelected; selected item: " + item);
-        if (item == mItemFace50)
+        if( item == mItemExit)
+        	this.onDestroy();
+        else if (item == mItemFace50)
             setMinFaceSize(0.5f);
         else if (item == mItemFace40)
             setMinFaceSize(0.4f);

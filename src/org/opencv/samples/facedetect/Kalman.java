@@ -1,10 +1,12 @@
 package org.opencv.samples.facedetect;
 
 
+import jama.Matrix;
+
+import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.List;
 
-import jama.Matrix;
 import jkalman.JKalman;
 import android.util.Log;
 
@@ -21,20 +23,21 @@ public class Kalman {
 	private boolean   configured = false;
 	private boolean   firstValue = false;
 	private double    pulse      = 0;
-	private double    f          = 0; // frequency
+	private double    f          = 1.2; // frequency
 	private double    omega;
 	private double    x,x_dt,z;
 	private double    pi         = (double) 3.141592654;
 	private double    old_z= 0;
 	private double    old_x= 0;
 	private double    old_x_dt= 0;
-	private double    A          = 2;
-	private double    fi         = pi;
+	private double    A          = 3;
+	private double    fi         = pi;//*0.00001;
 	private int       k          = 0;
 	private double    T          = 1/9;
 	private double    frameRate;
 	private double    t;
-	private FPS       fps;
+	
+	private FPS       Fps;
 	
 	private List<Double> listT           = new ArrayList<Double>();
     private List         pulseListKalman = new ArrayList();
@@ -76,7 +79,7 @@ public class Kalman {
 		    		                          {0,0.333*x*x*T*T*T*fi,-0.5*x*T*T*fi},
 		    		                          {0,-0.5*x*T*T*fi,T*fi}};
 
-		    double errorM = A*0.0001;
+		    double errorM = 0.0001;
 		    double [][] measurmentNoiseMatrix = {{errorM,0,0},
                                                  {0,errorM,0},
                                                  {0,0,errorM}};
@@ -95,19 +98,16 @@ public class Kalman {
 		
 	}
 	
-	public double getEstimation(double red) {
+	public double[] getEstimation(double red) {
 		
 		if(!configured){
 			configure(red);
-			fps = new FPS();
-			return pulse;
+			Fps = new FPS();
 		}
         ++k;
-		t = fps.getT();
-        frameRate = fps.getFPS();
+		t = Fps.getT();
+        frameRate = Fps.getFPS();
 		s = kalman.Predict();
-		
-		//kalman.setMeasurement_noise_cov(kalman.getMeasurement_noise_cov().identity());
 		
 		
         T = 1 / frameRate;
@@ -153,7 +153,10 @@ public class Kalman {
         if (firstValue){
         //x = old_x - K.get(0, 0)*( c.get(0,0) - red  );
         //x_dt = old_x_dt- K.get(1, 1)*( c.get(0,0) - red  );
-        z = old_z - K.get(2, 2)*(red - s.get(0,0));
+        //z = old_z - K.get(2, 0)*(s.get(0,0) - c.get(0,0)) -K.get(2, 1)*(s.get(1,0) - c.get(1,0)) -K.get(2, 2)*(s.get(2,0) - c.get(2,0));
+        
+        	z = old_z - K.get(2,2)*(c.get(0,0) - s.get(0,0));
+        	
         //Log.i(TAG,"K -> "+ z +" = "+ old_z +" - "+ K.get(2, 2)+" * "+"(  "+c.get(0,0)+" - "+red+"  );");
         
         //Log.i(TAG," c -> "+c.get(0,0)+" s -> "+s.get(0,0)+" red  -> "+red);
@@ -164,7 +167,7 @@ public class Kalman {
         
     	//old_x= x;
     	//old_x_dt= x_dt;
-        old_z=z;
+            old_z=z;
         }
         else {
         	firstValue=true;
@@ -174,13 +177,13 @@ public class Kalman {
         }
         
         f=Math.sqrt(Math.abs(z)/(4*pi*pi));
-        pulseListKalman.add(s.get(0,0));    
-        pulseList.add(f*60);
-        Log.i(TAG,"frames -> "+k);
+        // pulseListKalman.add(s.get(0,0));  
+        //pulseList.add(f*60);
+        //Log.i(TAG,"frames -> "+k);
         Log.i(TAG,"fps -> "+(1/avgT));
-        Log.i(TAG,"pulse in BPM->"+pulseList);
-        Log.i(TAG,"pulse list kalman->"+pulseListKalman);
-        return (f*60);
+        //Log.i(TAG,"pulse in BPM->"+pulseList);
+        //Log.i(TAG,"pulse list kalman->"+pulseListKalman);
+        return new double[] {(f*60), c.get(0,0)};
 		
 	}
 
